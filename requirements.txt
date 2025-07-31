@@ -8,3 +8,6 @@ pdfplumber
 langdetect
 transformers
 torch
+sentencepiece
+protobuf
+
