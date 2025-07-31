@@ -1,184 +1,159 @@
 """
-rag_chain.py – Universal pipeline: if user says 'hi' or any message, answer from Ollama in user's language; blend document search Q&A with open chat for off-topic, chit-chat, or unsupported queries.
+rag_chain.py – RAG pipeline using HuggingFace transformers pipeline instead of Ollama
+for Streamlit Cloud deployment compatibility
 """
 
-from langchain.embeddings import HuggingFaceEmbeddings
+from langchain_huggingface import HuggingFaceEmbeddings
 from langchain.vectorstores import Chroma
-from langchain_community.chat_models import ChatOllama
-from langchain.chains import ConversationalRetrievalChain
-from langchain.memory import ConversationBufferMemory
+from transformers import pipeline
 from langdetect import detect, LangDetectException
+import logging
 
-# Multilingual greeting triggers for bonus handling
+# Configure logging to reduce noise
+logging.getLogger("transformers").setLevel(logging.WARNING)
+
+# Language detection and prompts
+LANG_PROMPTS = {
+    'en': "English", 'hi': "Hindi", 'mr': "Marathi", 'ta': "Tamil",
+    'te': "Telugu", 'kn': "Kannada", 'gu': "Gujarati", 'bn': "Bengali",
+    'pa': "Punjabi", 'ml': "Malayalam", 'ur': "Urdu"
+}
+
 GREETINGS_LIST = [
     "hi", "hello", "hii", "hey",
     "नमस्ते", "हाय", "नमस्कार", "வணக்கம்", "ஹாய்",
     "హాయ్", "ഹായ്", "നമസ്കാരം", "ಹಾಯ್", "હાય", "হ্যালো", "ਸਤਿ ਸ਼੍ਰੀ ਅਕਾਲ"
 ]
 
-LANG_PROMPTS = {
-    'en': "English", 'hi': "Hindi (हिंदी)", 'mr': "Marathi (मराठी)", 'ta': "Tamil (தமிழ்)",
-    'te': "Telugu (తెలుగు)", 'kn': "Kannada (ಕನ್ನಡ)", 'gu': "Gujarati (ગુજરાતી)", 'bn': "Bengali (বাংলা)",
-    'pa': "Punjabi (ਪੰਜਾਬੀ)", 'ml': "Malayalam (മലയാളം)", 'ur': "Urdu (اردو)"
+GREETINGS_REPLY = {
+    'en': "Hello! 👋 How can I help you today with street vendor digitalization?",
+    'hi': "नमस्ते! मैं आपके स्ट्रीट वेंडर से जुड़े सवालों में कैसे मदद कर सकता हूँ?",
+    'mr': "नमस्कार! मी स्ट्रीट वेंडर विषयी आपल्याला कशी मदत करू शकतो?",
+    'ta': "வணக்கம்! தெரு வியாபாரிகள் தொடர்பான எந்த உதவியும் கேளுங்கள்.",
+    'te': "హాయ్! స్ట్రీట్ వెండర్ సంబంధించిన మీ ప్రశ్నలకు సహాయం చేస్తాను.",
+    'gu': "હાય! સ્ટ્રીટ વેન્ડર પ્રશ્નો માટે હું મદદ કરી શકું છું.",
+    'bn': "হ্যালো! রাস্তার বিক্রেতা সংক্রান্ত যেকোনো প্রশ্ন করুন।",
+    'pa': "ਸਤਿ ਸ਼੍ਰੀ ਅਕਾਲ! ਤੁਸੀਂ ਸਟਰੀਟ ਵੈਂਡਰ ਸੰਬੰਧੀ ਕੋਈ ਸਵਾਲ ਪੁੱਛੋ।",
+    'ml': "ഹായ്! സ്ട്രീറ്റ് വെണ്ടർ സംബന്ധിച്ചുള്ള നിങ്ങളുടെ ചോദ്യങ്ങളിൽ സഹായിക്കാം।",
 }
 
-BASE_SYSTEM_PROMPT = (
-    "You are a helpful, friendly assistant for Indian street vendors. "
-    "Always reply in the same language as the user. If you can answer from your document knowledge, do so; "
-    "otherwise, reply as a friendly LLM chat assistant in the user's language."
+# ─── Embeddings ──────────────────────
+embedder = HuggingFaceEmbeddings(
+    model_name="sentence-transformers/all-MiniLM-L6-v2"
 )
 
-# Langchain vector DB/LLM/memory setup (unchanged)
-embedder = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
-vectordb = Chroma(persist_directory="chroma_db", embedding_function=embedder)
-llm = ChatOllama(base_url="http://localhost:11434", model="qwen2.5:0.5b")
-memory = ConversationBufferMemory(return_messages=True, input_key="question", output_key="answer", memory_key="chat_history")
+# ─── Vector DB ────────────────────────
+try:
+    vectordb = Chroma(
+        persist_directory="chroma_db",
+        embedding_function=embedder
+    )
+    print("✅ Vector database loaded successfully")
+except Exception as e:
+    print(f"Warning: Could not load vector database: {e}")
+    vectordb = None
 
-# Core RAG chain for "knowledge" questions
-base_rag_chain = ConversationalRetrievalChain.from_llm(
-    llm=llm,
-    retriever=vectordb.as_retriever(search_kwargs={"k": 4}),
-    memory=memory
-)
+# ─── HuggingFace Text Generation Pipeline ────────
+try:
+    # Use a multilingual model that works well for QA
+    llm_pipeline = pipeline(
+        "text2text-generation",
+        model="google/flan-t5-base",
+        max_length=512,
+        do_sample=True,
+        temperature=0.7,
+        device=-1  # Use CPU (GPU not available on Streamlit Cloud)
+    )
+    print("✅ HuggingFace pipeline loaded successfully")
+except Exception as e:
+    print(f"❌ Error loading HuggingFace pipeline: {e}")
+    llm_pipeline = None
 
 def detect_user_language(text):
+    """Detect language of user input"""
     try:
         return detect(text)
     except LangDetectException:
         return "en"
 
-def rag_chain(question, forced_language=None):
-    # Detect language or use forced
-    user_lang = forced_language or detect_user_language(question)
-    lang_label = LANG_PROMPTS.get(user_lang, "English")
+def get_greeting_reply(lang_code):
+    """Get localized greeting response"""
+    return GREETINGS_REPLY.get(lang_code, GREETINGS_REPLY['en'])
 
-    # If input is a short greeting, reply in user's language
-    if question.strip().lower() in GREETINGS_LIST:
-        hello_replies = {
-            'en': "Hello! 👋 How can I help you today?",          'hi': "नमस्ते! कैसे मदद कर सकता हूँ?",
-            'mr': "नमस्कार! मी कशी मदत करू?",                     'ta': "வணக்கம்! நான் எப்படி உதவலாம்?",
-            'te': "హాయ్! ఎలా సహాయం చేయగలను?",                  'gu': "હાય! હું કેમ મદદ કરી શકું?",
-            'bn': "হ্যালো! কীভাবে সাহায্য করতে পারি?",            'pa': "ਸਤਿ ਸ਼੍ਰੀ ਅਕਾਲ! ਮੈਂ ਤੁਹਾਡੀ ਕਿਵੇਂ ਮਦਦ ਕਰ ਸਕਦਾ ਹਾਂ?",
-            'ml': "ഹായ്! എനിക്ക് നിങ്ങളെ എങ്ങനെ സഹായിക്കാം?",       'ur': "ہیلو! میں آپ کی مدد کیسے کرسکتا ہوں؟"
-        }
-        return {"answer": hello_replies.get(user_lang, hello_replies['en'])}
-
-    # Try to answer from knowledge base (RAG)
-    # Enhance the prompt with explicit "reply in X language" instruction
-    system_prompt = (
-        f"{BASE_SYSTEM_PROMPT} Reply in {lang_label}."
-    )
-    run_question = f"{system_prompt}\nUser Question: {question}"
-
-    # Call chain (RAG)
-    result = base_rag_chain.invoke({"question": run_question})
-
-    answer = result.get("answer") if isinstance(result, dict) else str(result)
-    # If RAG returns a poor/no answer, escalate to open LLM for generic chat
-    insufficient_answers = [
-        "", None,
-        "Sorry, I don't know.", "I don’t know.", "I'm not sure.",
-        "Sorry, I could not find an answer.",
-        "I'm not able to answer that question."
-    ]
-    if not answer or any(x.lower() in (answer or "").lower() for x in insufficient_answers):
-        # Use ChatOllama LLM for open domain response
-        completion = llm.invoke(f"{system_prompt}\nUser Message: {question}")
-        # This returns a LangChain ChatMessage object (check for draft/AI reply)
-        if hasattr(completion, "content"):
-            answer = completion.content
-    return {"answer": answer}
-
-# Optional: export detect_user_language and LANG_PROMPTS if you want language display in Streamlit
-"""
-rag_chain.py – Universal pipeline: if user says 'hi' or any message, answer from Ollama in user's language; blend document search Q&A with open chat for off-topic, chit-chat, or unsupported queries.
-"""
-
-from langchain.embeddings import HuggingFaceEmbeddings
-from langchain.vectorstores import Chroma
-from langchain_community.chat_models import ChatOllama
-from langchain.chains import ConversationalRetrievalChain
-from langchain.memory import ConversationBufferMemory
-from langdetect import detect, LangDetectException
-
-# Multilingual greeting triggers for bonus handling
-GREETINGS_LIST = [
-    "hi", "hello", "hii", "hey",
-    "नमस्ते", "हाय", "नमस्कार", "வணக்கம்", "ஹாய்",
-    "హాయ్", "ഹായ്", "നമസ്കാരം", "ಹಾಯ್", "હાય", "হ্যালো", "ਸਤਿ ਸ਼੍ਰੀ ਅਕਾਲ"
-]
-
-LANG_PROMPTS = {
-    'en': "English", 'hi': "Hindi (हिंदी)", 'mr': "Marathi (मराठी)", 'ta': "Tamil (தமிழ்)",
-    'te': "Telugu (తెలుగు)", 'kn': "Kannada (ಕನ್ನಡ)", 'gu': "Gujarati (ગુજરાતી)", 'bn': "Bengali (বাংলা)",
-    'pa': "Punjabi (ਪੰਜਾਬੀ)", 'ml': "Malayalam (മലയാളം)", 'ur': "Urdu (اردو)"
-}
-
-BASE_SYSTEM_PROMPT = (
-    "You are a helpful, friendly assistant for Indian street vendors. "
-    "Always reply in the same language as the user. If you can answer from your document knowledge, do so; "
-    "otherwise, reply as a friendly LLM chat assistant in the user's language."
-)
-
-# Langchain vector DB/LLM/memory setup (unchanged)
-embedder = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
-vectordb = Chroma(persist_directory="chroma_db", embedding_function=embedder)
-llm = ChatOllama(base_url="http://localhost:11434", model="qwen2.5:0.5b")
-memory = ConversationBufferMemory(return_messages=True, input_key="question", output_key="answer", memory_key="chat_history")
-
-# Core RAG chain for "knowledge" questions
-base_rag_chain = ConversationalRetrievalChain.from_llm(
-    llm=llm,
-    retriever=vectordb.as_retriever(search_kwargs={"k": 4}),
-    memory=memory
-)
-
-def detect_user_language(text):
+def search_documents(question, k=4):
+    """Search for relevant documents"""
+    if vectordb is None:
+        return []
+    
     try:
-        return detect(text)
-    except LangDetectException:
-        return "en"
+        retriever = vectordb.as_retriever(search_kwargs={"k": k})
+        docs = retriever.get_relevant_documents(question)
+        return [doc.page_content for doc in docs]
+    except Exception as e:
+        print(f"Document search error: {e}")
+        return []
+
+def generate_answer(question, context_docs, user_lang):
+    """Generate answer using HuggingFace pipeline"""
+    if llm_pipeline is None:
+        return "Sorry, the AI model is not available right now. Please try again later."
+    
+    # Create context from retrieved documents
+    context = "\n".join(context_docs[:3]) if context_docs else ""
+    
+    # Create a comprehensive prompt
+    lang_name = LANG_PROMPTS.get(user_lang, "English")
+    
+    if context:
+        prompt = f"""Context about Indian street vendor policies and schemes:
+{context}
+
+Question: {question}
+
+Based on the context above, please provide a helpful answer about street vendor digitalization, government schemes, or digital payments in India. If the context doesn't fully answer the question, supplement with general knowledge about Indian street vendor policies. Respond in {lang_name}."""
+    else:
+        prompt = f"""Question: {question}
+
+Please provide a helpful answer about street vendor digitalization, government schemes like PM-SVANidhi, digital payments, UPI setup, or related topics for Indian street vendors. Respond in {lang_name}."""
+    
+    try:
+        # Generate response
+        response = llm_pipeline(prompt, max_length=300, min_length=50)
+        answer = response[0]['generated_text'] if response else "I apologize, but I'm having trouble generating a response right now."
+        return answer
+    except Exception as e:
+        print(f"Generation error: {e}")
+        return f"I apologize, but I encountered an error while generating the response. Please try rephrasing your question."
 
 def rag_chain(question, forced_language=None):
-    # Detect language or use forced
+    """Main RAG function - handles greetings and questions"""
+    
+    # Detect or use forced language
     user_lang = forced_language or detect_user_language(question)
-    lang_label = LANG_PROMPTS.get(user_lang, "English")
-
-    # If input is a short greeting, reply in user's language
-    if question.strip().lower() in GREETINGS_LIST:
-        hello_replies = {
-            'en': "Hello! 👋 How can I help you today?",          'hi': "नमस्ते! कैसे मदद कर सकता हूँ?",
-            'mr': "नमस्कार! मी कशी मदत करू?",                     'ta': "வணக்கம்! நான் எப்படி உதவலாம்?",
-            'te': "హాయ్! ఎలా సహాయం చేయగలను?",                  'gu': "હાય! હું કેમ મદદ કરી શકું?",
-            'bn': "হ্যালো! কীভাবে সাহায্য করতে পারি?",            'pa': "ਸਤਿ ਸ਼੍ਰੀ ਅਕਾਲ! ਮੈਂ ਤੁਹਾਡੀ ਕਿਵੇਂ ਮਦਦ ਕਰ ਸਕਦਾ ਹਾਂ?",
-            'ml': "ഹായ്! എനിക്ക് നിങ്ങളെ എങ്ങനെ സഹായിക്കാം?",       'ur': "ہیلو! میں آپ کی مدد کیسے کرسکتا ہوں؟"
-        }
-        return {"answer": hello_replies.get(user_lang, hello_replies['en'])}
-
-    # Try to answer from knowledge base (RAG)
-    # Enhance the prompt with explicit "reply in X language" instruction
-    system_prompt = (
-        f"{BASE_SYSTEM_PROMPT} Reply in {lang_label}."
-    )
-    run_question = f"{system_prompt}\nUser Question: {question}"
-
-    # Call chain (RAG)
-    result = base_rag_chain.invoke({"question": run_question})
-
-    answer = result.get("answer") if isinstance(result, dict) else str(result)
-    # If RAG returns a poor/no answer, escalate to open LLM for generic chat
-    insufficient_answers = [
-        "", None,
-        "Sorry, I don't know.", "I don’t know.", "I'm not sure.",
-        "Sorry, I could not find an answer.",
-        "I'm not able to answer that question."
-    ]
-    if not answer or any(x.lower() in (answer or "").lower() for x in insufficient_answers):
-        # Use ChatOllama LLM for open domain response
-        completion = llm.invoke(f"{system_prompt}\nUser Message: {question}")
-        # This returns a LangChain ChatMessage object (check for draft/AI reply)
-        if hasattr(completion, "content"):
-            answer = completion.content
+    
+    # Handle greetings
+    question_clean = question.strip().lower()
+    if any(greeting in question_clean for greeting in GREETINGS_LIST):
+        return {"answer": get_greeting_reply(user_lang)}
+    
+    # Search for relevant documents
+    context_docs = search_documents(question)
+    
+    # Generate answer
+    answer = generate_answer(question, context_docs, user_lang)
+    
     return {"answer": answer}
 
-# Optional: export detect_user_language and LANG_PROMPTS if you want language display in Streamlit
+# Test function (for debugging)
+def test_pipeline():
+    """Test if the pipeline is working"""
+    try:
+        test_response = rag_chain("Hello")
+        print(f"Test successful: {test_response}")
+        return True
+    except Exception as e:
+        print(f"Test failed: {e}")
+        return False
+
+if __name__ == "__main__":
+    test_pipeline()
