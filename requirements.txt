@@ -1,9 +1,5 @@
---extra-index-url https://download.pytorch.org/whl/cpu
-torch==2.0.1+cpu
-transformers==4.30.0
-sentence-transformers==2.2.2
 streamlit
-langchain-community
+transformers==4.21.0
+torch==1.13.1+cpu --extra-index-url https://download.pytorch.org/whl/cpu
 chromadb
-pdfplumber
 langdetect
