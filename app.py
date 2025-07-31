@@ -1,5 +1,6 @@
 """
-app.py – Streamlit UI for OpenAI-powered multilingual street vendor chatbot
+app.py – Streamlit UI for Google Gemini-powered multilingual street vendor chatbot
+100% FREE - No OpenAI costs!
 """
 
 import streamlit as st
@@ -11,28 +12,30 @@ st.set_page_config(
     layout="wide"
 )
 
-# Check for OpenAI API key
-def check_openai_key():
+# Check for Gemini API key
+def check_gemini_key():
     try:
-        api_key = st.secrets.get("OPENAI_API_KEY")
-        return bool(api_key and api_key.startswith("sk-"))
+        api_key = st.secrets.get("GEMINI_API_KEY")
+        return bool(api_key and len(api_key) > 10)
     except:
         return False
 
 # Main title
 st.title("🏪 Street Vendor Digitalisation Agent")
-st.caption("🌍 Multilingual AI Assistant for Indian Street Vendors")
+st.caption("🌍 Multilingual AI Assistant for Indian Street Vendors (Powered by FREE Google Gemini)")
 
 # API Key warning
-if not check_openai_key():
+if not check_gemini_key():
     st.error("""
-    🔑 **OpenAI API Key Required**
+    🔑 **Google Gemini API Key Required**
     
-    To use this chatbot, you need to add your OpenAI API key:
+    To use this chatbot, you need to add your FREE Gemini API key:
     1. Click **"Manage app"** (bottom right)
     2. Go to **Settings** → **Secrets**
-    3. Add: `OPENAI_API_KEY="your-key-here"`
-    4. Get your API key from: https://platform.openai.com/api-keys
+    3. Add: `GEMINI_API_KEY="your-key-here"`
+    4. Get your FREE API key from: https://aistudio.google.com/
+    
+    ✅ **No credit card required - Completely FREE!**
     """)
     st.stop()
 
@@ -73,6 +76,17 @@ with col2:
     - "પીએમ સ્વનિધિ લોન કેવી રીતે મેળવવી?"
     - "நான் சென்னையில் பழம் விற்கிறேன். UPI எப்படி செட்டப் பண்ணுவது?"
     """)
+    
+    # Free API info
+    st.subheader("🆓 100% Free Service")
+    st.success("""
+    **This chatbot is completely FREE!**
+    
+    ✅ No subscription fees
+    ✅ No per-message charges  
+    ✅ Powered by Google Gemini
+    ✅ Generous daily limits
+    """)
 
 with col1:
     # Initialize chat history
@@ -88,8 +102,9 @@ with col1:
         • 📋 Street vendor registration
         • 🏛️ Government schemes and benefits
         • 💰 Digital payment solutions
+        • 📚 Street vendor rights and policies
         
-        **Ask me anything in your preferred language!**
+        **Ask me anything in your preferred language - it's completely FREE!**
         """
         st.session_state.messages.append({
             "role": "assistant", 
@@ -144,10 +159,10 @@ with col1:
         # Get AI response
         with st.chat_message("assistant"):
             placeholder = st.empty()
-            placeholder.markdown("_🤔 Thinking..._")
+            placeholder.markdown("_🤔 Thinking with Google Gemini..._")
             
             try:
-                # Call the RAG chain with OpenAI
+                # Call the RAG chain with Gemini
                 response = rag_chain(user_input, forced_lang)
                 answer_text = response.get("answer", "Sorry, I couldn't generate a response.")
                 
@@ -177,7 +192,7 @@ st.markdown(
     """
     <div style='text-align: center; color: #666; font-size: 0.8em;'>
         🏪 Street Vendor Digitalisation Agent | Built with ❤️ for Indian Entrepreneurs<br>
-        🤖 Powered by OpenAI GPT-3.5 | 🌍 Supporting 12+ Indian Languages
+        🤖 Powered by FREE Google Gemini API | 🌍 Supporting 12+ Indian Languages
     </div>
     """, 
     unsafe_allow_html=True
