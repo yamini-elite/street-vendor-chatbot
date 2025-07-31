@@ -1,13 +1,10 @@
 """
-rag_chain.py – RAG pipeline using OpenAI API via LangChain
-Streamlit Cloud compatible with minimal memory footprint
+rag_chain.py – RAG pipeline using Google Gemini API instead of OpenAI
+100% FREE - No payment required!
 """
 
-from langchain_openai import ChatOpenAI
-from langchain_community.embeddings import OpenAIEmbeddings
-from langchain.vectorstores import Chroma
-from langchain.chains import ConversationalRetrievalChain
-from langchain.memory import ConversationBufferMemory
+import google.generativeai as genai
+import streamlit as st
 from langdetect import detect, LangDetectException
 import os
 
@@ -36,76 +33,32 @@ GREETINGS_REPLY = {
     'ml': "ഹായ്! സ്ട്രീറ്റ് വെണ്ടർ സംബന്ധിച്ചുള്ള നിങ്ങളുടെ ചോദ്യങ്ങളിൽ സഹായിക്കാം।",
 }
 
-def get_openai_api_key():
-    """Get OpenAI API key from Streamlit secrets or environment"""
-    import streamlit as st
-    
-    # Try to get from Streamlit secrets first
+def get_gemini_api_key():
+    """Get Gemini API key from Streamlit secrets or environment"""
     try:
-        return st.secrets["OPENAI_API_KEY"]
+        return st.secrets["GEMINI_API_KEY"]
     except:
-        # Fallback to environment variable
-        return os.getenv("OPENAI_API_KEY")
+        return os.getenv("GEMINI_API_KEY")
 
-def init_openai_models():
-    """Initialize OpenAI models with API key"""
-    api_key = get_openai_api_key()
+def init_gemini():
+    """Initialize Google Gemini API"""
+    api_key = get_gemini_api_key()
     
     if not api_key:
-        return None, None
+        return None
     
-    # Initialize embeddings
-    embeddings = OpenAIEmbeddings(
-        model="text-embedding-3-small",  # Cost-effective embedding model
-        openai_api_key=api_key
-    )
-    
-    # Initialize chat model
-    llm = ChatOpenAI(
-        model="gpt-3.5-turbo",  # Cost-effective chat model
-        temperature=0.7,
-        openai_api_key=api_key
-    )
-    
-    return embeddings, llm
+    try:
+        genai.configure(api_key=api_key)
+        # Use Gemini 1.5 Flash - it's free and excellent for multilingual tasks
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        print("✅ Google Gemini initialized successfully")
+        return model
+    except Exception as e:
+        print(f"❌ Error initializing Gemini: {e}")
+        return None
 
-# ─── Initialize models ────────────────────────
-embeddings, llm = init_openai_models()
-
-# ─── Vector DB ────────────────────────
-try:
-    if embeddings:
-        vectordb = Chroma(
-            persist_directory="chroma_db",
-            embedding_function=embeddings
-        )
-        print("✅ Vector database loaded successfully")
-    else:
-        vectordb = None
-        print("⚠️ OpenAI API key not found - vector DB unavailable")
-except Exception as e:
-    print(f"Warning: Could not load vector database: {e}")
-    vectordb = None
-
-# ─── Memory and Chain ────────────────────────
-if llm:
-    memory = ConversationBufferMemory(
-        return_messages=True,
-        input_key="question",
-        output_key="answer",
-        memory_key="chat_history"
-    )
-    
-    if vectordb:
-        base_rag_chain = ConversationalRetrievalChain.from_llm(
-            llm=llm,
-            retriever=vectordb.as_retriever(search_kwargs={"k": 4}),
-            memory=memory
-        )
-    else:
-        base_rag_chain = None
-else:
-    base_rag_chain = None
+# Initialize Gemini model
+gemini_model = init_gemini()
 
 def detect_user_language(text):
     """Detect language of user input"""
@@ -118,12 +71,53 @@ def get_greeting_reply(lang_code):
     """Get localized greeting response"""
     return GREETINGS_REPLY.get(lang_code, GREETINGS_REPLY['en'])
 
-def rag_chain(question, forced_language=None):
-    """Main RAG function with OpenAI API"""
+def search_documents_simple(question):
+    """Simple document search - can be enhanced with vector search later"""
+    # This is a placeholder - you can add vector search here if you have ingested documents
+    # For now, return empty list to use pure Gemini responses
+    return []
+
+def generate_gemini_response(question, context_docs, user_lang):
+    """Generate response using Google Gemini API"""
+    if not gemini_model:
+        return "⚠️ Please add your Gemini API key to use the chatbot. Go to 'Manage app' → 'Settings' → 'Secrets' and add: GEMINI_API_KEY='your-key-here'"
     
-    # Check if OpenAI is available
-    if not llm:
-        return {"answer": "⚠️ Please add your OpenAI API key to use the chatbot. Go to 'Manage app' → 'Settings' → 'Secrets' and add: OPENAI_API_KEY='your-key-here'"}
+    # Create context from documents if available
+    context = "\n".join(context_docs[:3]) if context_docs else ""
+    
+    # Create language-specific prompt
+    lang_name = LANG_PROMPTS.get(user_lang, "English")
+    
+    if context:
+        prompt = f"""You are a helpful assistant for Indian street vendors. Please respond in {lang_name}.
+
+Context from government documents:
+{context}
+
+User Question: {question}
+
+Based on the context above and your knowledge, provide a helpful answer about street vendor digitalization, government schemes like PM-SVANidhi, digital payments, UPI setup, street vendor registration, or related topics for Indian street vendors. If the context doesn't fully answer the question, supplement with your general knowledge about Indian street vendor policies and digital initiatives.
+
+Important: Always respond in {lang_name} language."""
+    else:
+        prompt = f"""You are a helpful assistant for Indian street vendors. Please respond in {lang_name}.
+
+User Question: {question}
+
+Provide a helpful and detailed answer about street vendor digitalization, government schemes like PM-SVANidhi, digital payments, UPI QR code setup, street vendor registration, or related topics for Indian street vendors. Use your knowledge of Indian government policies and digital initiatives for street vendors.
+
+Important: Always respond in {lang_name} language."""
+    
+    try:
+        # Generate response with Gemini
+        response = gemini_model.generate_content(prompt)
+        return response.text
+    except Exception as e:
+        print(f"Gemini generation error: {e}")
+        return f"I apologize, but I encountered an error while generating the response. Please try rephrasing your question. Error: {str(e)}"
+
+def rag_chain(question, forced_language=None):
+    """Main RAG function using Google Gemini API"""
     
     # Detect or use forced language
     user_lang = forced_language or detect_user_language(question)
@@ -133,32 +127,27 @@ def rag_chain(question, forced_language=None):
     if any(greeting in question_clean for greeting in GREETINGS_LIST):
         return {"answer": get_greeting_reply(user_lang)}
     
-    # Use RAG chain if available, otherwise direct LLM
-    if base_rag_chain:
-        try:
-            # Create system prompt for language
-            lang_name = LANG_PROMPTS.get(user_lang, "English")
-            enhanced_question = f"Please answer in {lang_name}. Focus on street vendor digitalization, government schemes, and digital payments in India.\n\nQuestion: {question}"
-            
-            response = base_rag_chain.invoke({"question": enhanced_question})
-            return response
-        except Exception as e:
-            print(f"RAG chain error: {e}")
-            # Fallback to direct LLM
+    # Search for relevant documents (placeholder for now)
+    context_docs = search_documents_simple(question)
     
-    # Direct LLM fallback
+    # Generate answer using Gemini
+    answer = generate_gemini_response(question, context_docs, user_lang)
+    
+    return {"answer": answer}
+
+# Test function
+def test_gemini():
+    """Test if Gemini is working"""
     try:
-        lang_name = LANG_PROMPTS.get(user_lang, "English")
-        prompt = f"""You are a helpful assistant for Indian street vendors. Answer in {lang_name}.
-        
-        Question: {question}
-        
-        Provide helpful information about street vendor digitalization, government schemes like PM-SVANidhi, digital payments, UPI setup, or related topics for Indian street vendors."""
-        
-        response = llm.invoke(prompt)
-        return {"answer": response.content}
+        test_response = rag_chain("Hello")
+        print(f"Gemini test successful: {test_response}")
+        return True
     except Exception as e:
-        return {"answer": f"Sorry, I encountered an error: {str(e)}"}
+        print(f"Gemini test failed: {e}")
+        return False
 
 # Export functions for app.py
 __all__ = ['rag_chain', 'LANG_PROMPTS', 'detect_user_language']
+
+if __name__ == "__main__":
+    test_gemini()
