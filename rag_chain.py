@@ -56,14 +56,14 @@ except Exception as e:
 # ─── HuggingFace Text Generation Pipeline ────────
 try:
     # Use a multilingual model that works well for QA
-    llm_pipeline = pipeline(
-        "text2text-generation",
-        model="google/flan-t5-base",
-        max_length=512,
-        do_sample=True,
-        temperature=0.7,
-        device=-1  # Use CPU (GPU not available on Streamlit Cloud)
-    )
+   llm_pipeline = pipeline(
+    "text2text-generation",
+    model="google/flan-t5-small",  # ← Changed from flan-t5-base
+    max_length=300,
+    do_sample=True,
+    temperature=0.7,
+    device=-1  # CPU only
+)
     print("✅ HuggingFace pipeline loaded successfully")
 except Exception as e:
     print(f"❌ Error loading HuggingFace pipeline: {e}")
