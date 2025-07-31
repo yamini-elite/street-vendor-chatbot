@@ -1,5 +1,7 @@
+torch==2.0.1+cpu --extra-index-url https://download.pytorch.org/whl/cpu
+transformers==4.30.0
 streamlit
-transformers==4.21.0
-torch==1.13.1+cpu --extra-index-url https://download.pytorch.org/whl/cpu
 chromadb
+pdfplumber
 langdetect
+numpy
