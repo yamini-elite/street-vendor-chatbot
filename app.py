@@ -1,6 +1,5 @@
 """
-app.py – Streamlit UI for the multilingual street vendor chatbot
-Compatible with HuggingFace pipeline backend
+app.py – Streamlit UI for OpenAI-powered multilingual street vendor chatbot
 """
 
 import streamlit as st
@@ -12,9 +11,30 @@ st.set_page_config(
     layout="wide"
 )
 
+# Check for OpenAI API key
+def check_openai_key():
+    try:
+        api_key = st.secrets.get("OPENAI_API_KEY")
+        return bool(api_key and api_key.startswith("sk-"))
+    except:
+        return False
+
 # Main title
 st.title("🏪 Street Vendor Digitalisation Agent")
 st.caption("🌍 Multilingual AI Assistant for Indian Street Vendors")
+
+# API Key warning
+if not check_openai_key():
+    st.error("""
+    🔑 **OpenAI API Key Required**
+    
+    To use this chatbot, you need to add your OpenAI API key:
+    1. Click **"Manage app"** (bottom right)
+    2. Go to **Settings** → **Secrets**
+    3. Add: `OPENAI_API_KEY="your-key-here"`
+    4. Get your API key from: https://platform.openai.com/api-keys
+    """)
+    st.stop()
 
 # Create two columns for main layout
 col1, col2 = st.columns([3, 1])
@@ -127,7 +147,7 @@ with col1:
             placeholder.markdown("_🤔 Thinking..._")
             
             try:
-                # Call the RAG chain with HuggingFace pipeline
+                # Call the RAG chain with OpenAI
                 response = rag_chain(user_input, forced_lang)
                 answer_text = response.get("answer", "Sorry, I couldn't generate a response.")
                 
@@ -142,7 +162,7 @@ with col1:
                 })
                 
             except Exception as e:
-                error_msg = f"❌ **Error occurred:** {str(e)}\n\nPlease try again or rephrase your question."
+                error_msg = f"❌ **Error occurred:** {str(e)}\n\nPlease try again or contact support."
                 placeholder.markdown(error_msg)
                 
                 # Save error message
@@ -157,7 +177,7 @@ st.markdown(
     """
     <div style='text-align: center; color: #666; font-size: 0.8em;'>
         🏪 Street Vendor Digitalisation Agent | Built with ❤️ for Indian Entrepreneurs<br>
-        🤖 Powered by HuggingFace Transformers | 🌍 Supporting 12+ Indian Languages
+        🤖 Powered by OpenAI GPT-3.5 | 🌍 Supporting 12+ Indian Languages
     </div>
     """, 
     unsafe_allow_html=True
