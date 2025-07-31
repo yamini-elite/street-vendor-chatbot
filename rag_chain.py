@@ -1,13 +1,15 @@
 """
-rag_chain.py – RAG pipeline using HuggingFace transformers pipeline instead of Ollama
-for Streamlit Cloud deployment compatibility
+rag_chain.py – Ultra-minimal RAG pipeline using transformers directly 
+for maximum Streamlit Cloud compatibility with reduced memory usage
 """
 
-from langchain_huggingface import HuggingFaceEmbeddings
+from transformers import AutoTokenizer, AutoModel, pipeline
+import torch
+import numpy as np
 from langchain.vectorstores import Chroma
-from transformers import pipeline
 from langdetect import detect, LangDetectException
 import logging
+import os
 
 # Configure logging to reduce noise
 logging.getLogger("transformers").setLevel(logging.WARNING)
@@ -37,10 +39,49 @@ GREETINGS_REPLY = {
     'ml': "ഹായ്! സ്ട്രീറ്റ് വെണ്ടർ സംബന്ധിച്ചുള്ള നിങ്ങളുടെ ചോദ്യങ്ങളിൽ സഹായിക്കാം।",
 }
 
-# ─── Embeddings ──────────────────────
-embedder = HuggingFaceEmbeddings(
-    model_name="sentence-transformers/all-MiniLM-L6-v2"
-)
+# ─── Custom SimpleEmbeddings Class ──────────────────────
+class SimpleEmbeddings:
+    def __init__(self):
+        print("🔄 Loading embedding model...")
+        self.tokenizer = AutoTokenizer.from_pretrained('sentence-transformers/all-MiniLM-L6-v2')
+        self.model = AutoModel.from_pretrained('sentence-transformers/all-MiniLM-L6-v2')
+        print("✅ Embedding model loaded successfully")
+    
+    def embed_documents(self, texts):
+        """Embed a list of documents"""
+        if not texts:
+            return []
+        
+        # Process in batches to avoid memory issues
+        batch_size = 32
+        all_embeddings = []
+        
+        for i in range(0, len(texts), batch_size):
+            batch_texts = texts[i:i + batch_size]
+            inputs = self.tokenizer(batch_texts, padding=True, truncation=True, 
+                                  return_tensors="pt", max_length=512)
+            
+            with torch.no_grad():
+                outputs = self.model(**inputs)
+                # Mean pooling
+                embeddings = outputs.last_hidden_state.mean(dim=1).numpy()
+                all_embeddings.extend(embeddings)
+        
+        return all_embeddings
+    
+    def embed_query(self, text):
+        """Embed a single query"""
+        inputs = self.tokenizer([text], padding=True, truncation=True, 
+                               return_tensors="pt", max_length=512)
+        
+        with torch.no_grad():
+            outputs = self.model(**inputs)
+            embedding = outputs.last_hidden_state.mean(dim=1).numpy()[0]
+        
+        return embedding
+
+# ─── Initialize Embeddings ──────────────────────
+embedder = SimpleEmbeddings()
 
 # ─── Vector DB ────────────────────────
 try:
@@ -55,16 +96,18 @@ except Exception as e:
 
 # ─── HuggingFace Text Generation Pipeline ────────
 try:
-    # Use a multilingual model that works well for QA
-   llm_pipeline = pipeline(
-    "text2text-generation",
-    model="google/flan-t5-small",  # ← Changed from flan-t5-base
-    max_length=300,
-    do_sample=True,
-    temperature=0.7,
-    device=-1  # CPU only
-)
-    print("✅ HuggingFace pipeline loaded successfully")
+    print("🔄 Loading text generation model...")
+    # Use the smaller model for better memory efficiency
+    llm_pipeline = pipeline(
+        "text2text-generation",
+        model="google/flan-t5-small",  # Smaller model for Streamlit Cloud
+        max_length=400,
+        do_sample=True,
+        temperature=0.7,
+        device=-1,  # Use CPU
+        model_kwargs={"torch_dtype": torch.float32}
+    )
+    print("✅ Text generation pipeline loaded successfully")
 except Exception as e:
     print(f"❌ Error loading HuggingFace pipeline: {e}")
     llm_pipeline = None
@@ -110,15 +153,15 @@ def generate_answer(question, context_docs, user_lang):
 
 Question: {question}
 
-Based on the context above, please provide a helpful answer about street vendor digitalization, government schemes, or digital payments in India. If the context doesn't fully answer the question, supplement with general knowledge about Indian street vendor policies. Respond in {lang_name}."""
+Based on the context above, provide a helpful answer about street vendor digitalization, government schemes, or digital payments in India. If context doesn't fully cover the question, add general knowledge about Indian street vendor policies. Answer in {lang_name}."""
     else:
         prompt = f"""Question: {question}
 
-Please provide a helpful answer about street vendor digitalization, government schemes like PM-SVANidhi, digital payments, UPI setup, or related topics for Indian street vendors. Respond in {lang_name}."""
+Provide a helpful answer about street vendor digitalization, government schemes like PM-SVANidhi, digital payments, UPI setup, or related topics for Indian street vendors. Answer in {lang_name}."""
     
     try:
         # Generate response
-        response = llm_pipeline(prompt, max_length=300, min_length=50)
+        response = llm_pipeline(prompt, max_length=350, min_length=30)
         answer = response[0]['generated_text'] if response else "I apologize, but I'm having trouble generating a response right now."
         return answer
     except Exception as e:
@@ -148,6 +191,7 @@ def rag_chain(question, forced_language=None):
 def test_pipeline():
     """Test if the pipeline is working"""
     try:
+        print("🧪 Testing pipeline...")
         test_response = rag_chain("Hello")
         print(f"Test successful: {test_response}")
         return True
