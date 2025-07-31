@@ -1,13 +1,9 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.0.1+cpu
+transformers==4.30.0
+sentence-transformers==2.2.2
 streamlit
-langchain
 langchain-community
-langchain-huggingface
 chromadb
-sentence-transformers
 pdfplumber
 langdetect
-transformers
-torch
-sentencepiece
-protobuf
-
