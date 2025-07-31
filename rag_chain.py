@@ -1,18 +1,15 @@
 """
-rag_chain.py – Ultra-minimal RAG pipeline using transformers directly 
-for maximum Streamlit Cloud compatibility with reduced memory usage
+rag_chain.py – RAG pipeline using OpenAI API via LangChain
+Streamlit Cloud compatible with minimal memory footprint
 """
 
-from transformers import AutoTokenizer, AutoModel, pipeline
-import torch
-import numpy as np
+from langchain_openai import ChatOpenAI
+from langchain_community.embeddings import OpenAIEmbeddings
 from langchain.vectorstores import Chroma
+from langchain.chains import ConversationalRetrievalChain
+from langchain.memory import ConversationBufferMemory
 from langdetect import detect, LangDetectException
-import logging
 import os
-
-# Configure logging to reduce noise
-logging.getLogger("transformers").setLevel(logging.WARNING)
 
 # Language detection and prompts
 LANG_PROMPTS = {
@@ -39,78 +36,76 @@ GREETINGS_REPLY = {
     'ml': "ഹായ്! സ്ട്രീറ്റ് വെണ്ടർ സംബന്ധിച്ചുള്ള നിങ്ങളുടെ ചോദ്യങ്ങളിൽ സഹായിക്കാം।",
 }
 
-# ─── Custom SimpleEmbeddings Class ──────────────────────
-class SimpleEmbeddings:
-    def __init__(self):
-        print("🔄 Loading embedding model...")
-        self.tokenizer = AutoTokenizer.from_pretrained('sentence-transformers/all-MiniLM-L6-v2')
-        self.model = AutoModel.from_pretrained('sentence-transformers/all-MiniLM-L6-v2')
-        print("✅ Embedding model loaded successfully")
+def get_openai_api_key():
+    """Get OpenAI API key from Streamlit secrets or environment"""
+    import streamlit as st
     
-    def embed_documents(self, texts):
-        """Embed a list of documents"""
-        if not texts:
-            return []
-        
-        # Process in batches to avoid memory issues
-        batch_size = 32
-        all_embeddings = []
-        
-        for i in range(0, len(texts), batch_size):
-            batch_texts = texts[i:i + batch_size]
-            inputs = self.tokenizer(batch_texts, padding=True, truncation=True, 
-                                  return_tensors="pt", max_length=512)
-            
-            with torch.no_grad():
-                outputs = self.model(**inputs)
-                # Mean pooling
-                embeddings = outputs.last_hidden_state.mean(dim=1).numpy()
-                all_embeddings.extend(embeddings)
-        
-        return all_embeddings
-    
-    def embed_query(self, text):
-        """Embed a single query"""
-        inputs = self.tokenizer([text], padding=True, truncation=True, 
-                               return_tensors="pt", max_length=512)
-        
-        with torch.no_grad():
-            outputs = self.model(**inputs)
-            embedding = outputs.last_hidden_state.mean(dim=1).numpy()[0]
-        
-        return embedding
+    # Try to get from Streamlit secrets first
+    try:
+        return st.secrets["OPENAI_API_KEY"]
+    except:
+        # Fallback to environment variable
+        return os.getenv("OPENAI_API_KEY")
 
-# ─── Initialize Embeddings ──────────────────────
-embedder = SimpleEmbeddings()
+def init_openai_models():
+    """Initialize OpenAI models with API key"""
+    api_key = get_openai_api_key()
+    
+    if not api_key:
+        return None, None
+    
+    # Initialize embeddings
+    embeddings = OpenAIEmbeddings(
+        model="text-embedding-3-small",  # Cost-effective embedding model
+        openai_api_key=api_key
+    )
+    
+    # Initialize chat model
+    llm = ChatOpenAI(
+        model="gpt-3.5-turbo",  # Cost-effective chat model
+        temperature=0.7,
+        openai_api_key=api_key
+    )
+    
+    return embeddings, llm
+
+# ─── Initialize models ────────────────────────
+embeddings, llm = init_openai_models()
 
 # ─── Vector DB ────────────────────────
 try:
-    vectordb = Chroma(
-        persist_directory="chroma_db",
-        embedding_function=embedder
-    )
-    print("✅ Vector database loaded successfully")
+    if embeddings:
+        vectordb = Chroma(
+            persist_directory="chroma_db",
+            embedding_function=embeddings
+        )
+        print("✅ Vector database loaded successfully")
+    else:
+        vectordb = None
+        print("⚠️ OpenAI API key not found - vector DB unavailable")
 except Exception as e:
     print(f"Warning: Could not load vector database: {e}")
     vectordb = None
 
-# ─── HuggingFace Text Generation Pipeline ────────
-try:
-    print("🔄 Loading text generation model...")
-    # Use the smaller model for better memory efficiency
-    llm_pipeline = pipeline(
-        "text2text-generation",
-        model="google/flan-t5-small",  # Smaller model for Streamlit Cloud
-        max_length=400,
-        do_sample=True,
-        temperature=0.7,
-        device=-1,  # Use CPU
-        model_kwargs={"torch_dtype": torch.float32}
+# ─── Memory and Chain ────────────────────────
+if llm:
+    memory = ConversationBufferMemory(
+        return_messages=True,
+        input_key="question",
+        output_key="answer",
+        memory_key="chat_history"
     )
-    print("✅ Text generation pipeline loaded successfully")
-except Exception as e:
-    print(f"❌ Error loading HuggingFace pipeline: {e}")
-    llm_pipeline = None
+    
+    if vectordb:
+        base_rag_chain = ConversationalRetrievalChain.from_llm(
+            llm=llm,
+            retriever=vectordb.as_retriever(search_kwargs={"k": 4}),
+            memory=memory
+        )
+    else:
+        base_rag_chain = None
+else:
+    base_rag_chain = None
 
 def detect_user_language(text):
     """Detect language of user input"""
@@ -123,53 +118,12 @@ def get_greeting_reply(lang_code):
     """Get localized greeting response"""
     return GREETINGS_REPLY.get(lang_code, GREETINGS_REPLY['en'])
 
-def search_documents(question, k=4):
-    """Search for relevant documents"""
-    if vectordb is None:
-        return []
-    
-    try:
-        retriever = vectordb.as_retriever(search_kwargs={"k": k})
-        docs = retriever.get_relevant_documents(question)
-        return [doc.page_content for doc in docs]
-    except Exception as e:
-        print(f"Document search error: {e}")
-        return []
-
-def generate_answer(question, context_docs, user_lang):
-    """Generate answer using HuggingFace pipeline"""
-    if llm_pipeline is None:
-        return "Sorry, the AI model is not available right now. Please try again later."
-    
-    # Create context from retrieved documents
-    context = "\n".join(context_docs[:3]) if context_docs else ""
-    
-    # Create a comprehensive prompt
-    lang_name = LANG_PROMPTS.get(user_lang, "English")
-    
-    if context:
-        prompt = f"""Context about Indian street vendor policies and schemes:
-{context}
-
-Question: {question}
-
-Based on the context above, provide a helpful answer about street vendor digitalization, government schemes, or digital payments in India. If context doesn't fully cover the question, add general knowledge about Indian street vendor policies. Answer in {lang_name}."""
-    else:
-        prompt = f"""Question: {question}
-
-Provide a helpful answer about street vendor digitalization, government schemes like PM-SVANidhi, digital payments, UPI setup, or related topics for Indian street vendors. Answer in {lang_name}."""
-    
-    try:
-        # Generate response
-        response = llm_pipeline(prompt, max_length=350, min_length=30)
-        answer = response[0]['generated_text'] if response else "I apologize, but I'm having trouble generating a response right now."
-        return answer
-    except Exception as e:
-        print(f"Generation error: {e}")
-        return f"I apologize, but I encountered an error while generating the response. Please try rephrasing your question."
-
 def rag_chain(question, forced_language=None):
-    """Main RAG function - handles greetings and questions"""
+    """Main RAG function with OpenAI API"""
+    
+    # Check if OpenAI is available
+    if not llm:
+        return {"answer": "⚠️ Please add your OpenAI API key to use the chatbot. Go to 'Manage app' → 'Settings' → 'Secrets' and add: OPENAI_API_KEY='your-key-here'"}
     
     # Detect or use forced language
     user_lang = forced_language or detect_user_language(question)
@@ -179,25 +133,32 @@ def rag_chain(question, forced_language=None):
     if any(greeting in question_clean for greeting in GREETINGS_LIST):
         return {"answer": get_greeting_reply(user_lang)}
     
-    # Search for relevant documents
-    context_docs = search_documents(question)
+    # Use RAG chain if available, otherwise direct LLM
+    if base_rag_chain:
+        try:
+            # Create system prompt for language
+            lang_name = LANG_PROMPTS.get(user_lang, "English")
+            enhanced_question = f"Please answer in {lang_name}. Focus on street vendor digitalization, government schemes, and digital payments in India.\n\nQuestion: {question}"
+            
+            response = base_rag_chain.invoke({"question": enhanced_question})
+            return response
+        except Exception as e:
+            print(f"RAG chain error: {e}")
+            # Fallback to direct LLM
     
-    # Generate answer
-    answer = generate_answer(question, context_docs, user_lang)
-    
-    return {"answer": answer}
-
-# Test function (for debugging)
-def test_pipeline():
-    """Test if the pipeline is working"""
+    # Direct LLM fallback
     try:
-        print("🧪 Testing pipeline...")
-        test_response = rag_chain("Hello")
-        print(f"Test successful: {test_response}")
-        return True
+        lang_name = LANG_PROMPTS.get(user_lang, "English")
+        prompt = f"""You are a helpful assistant for Indian street vendors. Answer in {lang_name}.
+        
+        Question: {question}
+        
+        Provide helpful information about street vendor digitalization, government schemes like PM-SVANidhi, digital payments, UPI setup, or related topics for Indian street vendors."""
+        
+        response = llm.invoke(prompt)
+        return {"answer": response.content}
     except Exception as e:
-        print(f"Test failed: {e}")
-        return False
+        return {"answer": f"Sorry, I encountered an error: {str(e)}"}
 
-if __name__ == "__main__":
-    test_pipeline()
+# Export functions for app.py
+__all__ = ['rag_chain', 'LANG_PROMPTS', 'detect_user_language']
