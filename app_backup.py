@@ -1,5 +1,5 @@
 """
-app.py – Streamlit UI for Groq-powered multilingual street vendor chatbot
+app.py – Streamlit UI for Google Gemini-powered multilingual street vendor chatbot
 100% FREE - No OpenAI costs!
 """
 
@@ -82,10 +82,10 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Check for Groq API key
-def check_groq_key():
+# Check for Gemini API key
+def check_gemini_key():
     try:
-        api_key = st.secrets.get("GROQ_API_KEY")
+        api_key = st.secrets.get("GEMINI_API_KEY")
         return bool(api_key and len(api_key) > 10)
     except:
         return False
@@ -96,21 +96,21 @@ st.markdown("""
     <div class="main-title">🏪 Street Vendor Digitalisation Agent</div>
     <div class="subtitle">🌍 Multilingual AI Assistant for Indian Street Vendors</div>
     <div style="font-size: 0.9rem; opacity: 0.8; margin-top: 0.5rem;">
-        Powered by FREE Groq • Supporting 12+ Indian Languages
+        Powered by FREE Google Gemini • Supporting 12+ Indian Languages
     </div>
 </div>
 """, unsafe_allow_html=True)
 
 # API Key warning
-if not check_groq_key():
+if not check_gemini_key():
     st.error("""
-    🔑 **Groq API Key Required**
+    🔑 **Google Gemini API Key Required**
     
-    To use this chatbot, you need to add your FREE Groq API key:
+    To use this chatbot, you need to add your FREE Gemini API key:
     1. Click **"Manage app"** (bottom right)
     2. Go to **Settings** → **Secrets**
-    3. Add: `GROQ_API_KEY="your-key-here"`
-    4. Get your FREE API key from: https://console.groq.com/
+    3. Add: `GEMINI_API_KEY="your-key-here"`
+    4. Get your FREE API key from: https://aistudio.google.com/
     
     ✅ **No credit card required - Completely FREE!**
     """)
@@ -170,7 +170,7 @@ with col2:
     
     ✅ No subscription fees
     ✅ No per-message charges  
-    ✅ Powered by Groq AI
+    ✅ Powered by Google Gemini
     ✅ Generous daily limits
     """)
     st.markdown('</div>', unsafe_allow_html=True)
@@ -250,10 +250,10 @@ with col1:
         # Get AI response
         with st.chat_message("assistant"):
             placeholder = st.empty()
-            placeholder.markdown("_🤔 Thinking with Groq AI..._")
+            placeholder.markdown("_🤔 Thinking with Google Gemini..._")
             
             try:
-                # Call the RAG chain with Groq
+                # Call the RAG chain with Gemini
                 response = rag_chain(user_input, forced_lang)
                 answer_text = response.get("answer", "Sorry, I couldn't generate a response.")
                 
@@ -284,7 +284,7 @@ st.markdown("""
         🏪 <strong>Street Vendor Digitalisation Agent</strong> | Built with ❤️ for Indian Entrepreneurs
     </div>
     <div>
-        🤖 Powered by FREE Groq API | 🌍 Supporting 12+ Indian Languages
+        🤖 Powered by FREE Google Gemini API | 🌍 Supporting 12+ Indian Languages
     </div>
 </div>
 """, unsafe_allow_html=True)
